@@ -1,15 +1,17 @@
 """
-EXEMPLO EDUCACIONAL - Vulnerabilidades XSS e SQL Injection
-Este codigo demonstra vulnerabilidades de seguranca para fins de aprendizado.
-NAO USE EM PRODUCAO!
+EXEMPLO EDUCACIONAL - Vulnerabilidades XSS e SQL Injection (CORRIGIDO)
+Este codigo demonstra como CORRIGIR vulnerabilidades de seguranca.
+NAO USE EM PRODUCAO SEM REVISAO COMPLETA!
 """
 
 from flask import Flask, request
 import sqlite3
+import html
+import os
 
 app = Flask(__name__)
 
-# Inicializar banco de dados vulneravel
+# Inicializar banco de dados
 def init_db():
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
@@ -25,7 +27,7 @@ init_db()
 @app.route('/')
 def index():
     return '''
-        <h1>Exemplos de Vulnerabilidades</h1>
+        <h1>Exemplos de Vulnerabilidades (Corrigidas)</h1>
         <h2>XSS - Pesquisa</h2>
         <form action="/search" method="GET">
             <input type="text" name="q" placeholder="Digite sua busca">
@@ -47,10 +49,12 @@ def index():
 @app.route('/search')
 def search():
     query = request.args.get('q', '')
-    # VULNERAVEL: O input do usuario e renderizado diretamente no HTML
-    # sem sanitizacao, permitindo injecao de scripts maliciosos
+    # CORRIGIDO: html.escape() converte caracteres especiais (<, >, &, ", ')
+    # em entidades HTML, prevenindo XSS.
+    # VULNERAVEL seria: return f'<h1>Resultados para: {query}</h1>'
+    safe_query = html.escape(query)
     return f'''
-        <h1>Resultados para: {query}</h1>
+        <h1>Resultados para: {safe_query}</h1>
         <p>Nenhum resultado encontrado.</p>
         <a href="/">Voltar</a>
     '''
@@ -60,19 +64,23 @@ def login():
     username = request.form.get('username', '')
     password = request.form.get('password', '')
 
-    # VULNERAVEL: SQL Injection - concatenacao direta de strings na query
-    # Permite que atacantes injetem SQL arbitrario (ex: admin' OR '1'='1)
+    # CORRIGIDO: Usando parametros preparados (?) em vez de concatenacao de strings.
+    # VULNERAVEL seria:
+    #   query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
+    # Isso permitiria injecao como: admin' OR '1'='1
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
-    query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
-    cursor.execute(query)
+    query = "SELECT * FROM users WHERE username=? AND password=?"
+    cursor.execute(query, (username, password))
     user = cursor.fetchone()
     conn.close()
 
     if user:
+        # CORRIGIDO: Escapando o username para prevenir XSS secundario
+        safe_username = html.escape(user[1])
         return f'''
             <h1>Login bem-sucedido!</h1>
-            <p>Bem-vindo, {user[1]}!</p>
+            <p>Bem-vindo, {safe_username}!</p>
             <a href="/">Voltar</a>
         '''
     else:
@@ -86,21 +94,32 @@ def login():
 def get_user():
     user_id = request.args.get('id', '')
 
-    # VULNERAVEL: SQL Injection - parametro user_id concatenado diretamente
-    # Permite extracao de dados (ex: 1 OR 1=1)
+    # CORRIGIDO: Validacao de entrada antes de usar o parametro
+    if not user_id:
+        return '<h1>Erro: ID nao fornecido</h1><a href="/">Voltar</a>'
+
+    # CORRIGIDO: Usando parametros preparados (?) em vez de concatenacao de strings.
+    # VULNERAVEL seria: query = "SELECT * FROM users WHERE id=" + user_id
+    # Isso permitiria injecao como: 1 OR 1=1
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
-    query = "SELECT * FROM users WHERE id=" + user_id
-    cursor.execute(query)
+    query = "SELECT * FROM users WHERE id=?"
+    cursor.execute(query, (user_id,))
     users = cursor.fetchall()
     conn.close()
 
+    # CORRIGIDO: Escapando dados do banco para prevenir XSS
     result = '<h1>Usuarios encontrados:</h1>'
     for user in users:
-        result += f'<p>ID: {user[0]}, Usuario: {user[1]}</p>'
+        safe_id = html.escape(str(user[0]))
+        safe_username = html.escape(str(user[1]))
+        result += f'<p>ID: {safe_id}, Usuario: {safe_username}</p>'
     result += '<a href="/">Voltar</a>'
 
     return result
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # CORRIGIDO: Usando variavel de ambiente para controlar o modo debug.
+    # VULNERAVEL seria: app.run(debug=True) — expoe stack traces e console interativo em producao.
+    debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(debug=debug_mode)
